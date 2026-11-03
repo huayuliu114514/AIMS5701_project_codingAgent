@@ -1,0 +1,23 @@
+# The interpreter and installed packages (~700 MB of binaries). Rebuilt from
+# pyproject.toml, so it is never committed; it is still needed to run anything.
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# setuptools' wheel-staging copies (`pip wheel`, `python -m build`). Stale
+# duplicates of sweagent/ that drift out of sync the moment the source changes.
+build/
+dist/
+
+# pytest's own speed-up cache. Safe to delete, rebuilt on the next run.
+.pytest_cache/
+
+# Experiment output: patches, test logs, evaluator reports, agent trajectories.
+# Large, rewritten on every run, never hand-edited.
+runs/
+logs/
+
+# data/tasks.jsonl is deliberately NOT ignored. It is the record of which tasks
+# a given result was measured on; the selection code will keep changing, and
+# without the file there is no way to tell what a past number refers to.

@@ -1,0 +1,24 @@
+[project]
+name = "swe-scaffold-study"
+version = "0.1.0"
+description = "Comparing agent scaffoldings for small coding models on repository maintenance"
+requires-python = ">=3.10"
+
+# The evaluation harness, container tooling, and metric reporting we do not
+# reimplement. Pinned to the release the whole experiment is measured against.
+dependencies = [
+    "swebench==5.0.2",
+    "datasets>=2.18.0",
+    "docker>=7.0.0",
+    "requests>=2.32.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+# Only packages that actually exist are claimed; this grows one file at a time.
+[tool.setuptools.packages.find]
+include = ["sweagent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
