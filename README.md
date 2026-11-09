@@ -18,12 +18,12 @@ reimplemented, so resolution numbers stay comparable with published results.
 
 ## Status
 
-Early. The evaluation chain is validated end to end; the scaffolds are not yet
-built.
+Early. The runner and official grading integration are implemented; the
+scaffolds are not yet built.
 
 - [x] Task selection with the proposal's filter (2–4 non-test source files, ≥3 repos)
+- [x] Sequential runner and prediction recording
 - [x] Verify official grading on one instance (gold patch resolves)
-- [ ] Container execution layer (`sweagent/envs/docker_env.py`, in progress)
 - [ ] C0 baseline scaffold
 - [ ] Repository mapping + symbol retrieval (C1, C2 differ here)
 - [ ] Planning, incremental patching, test-driven recovery
@@ -38,7 +38,8 @@ conda create -y -p ./env python=3.11
 
 `swebench` needs Python ≥3.10. Docker must be running: the evaluator pulls
 `swebench/sweb.eval.x86_64.*` images (~2–3 GB each) and runs the hidden tests
-inside them.
+inside them. Agents use prepared local repository checkouts; the project's
+custom `DockerEnv` is currently unused.
 
 ## Pipeline
 
@@ -63,20 +64,22 @@ data/tasks.jsonl          committed: the record of what a result was measured on
 ```
 sweagent/
   dataset.py           task selection and the files/repos filter
-  envs/docker_env.py   container lifecycle, exec, patch capture  (in progress)
+  sweep.py             agent runner and official grading integration
+  envs/docker_env.py   unused container-layer stub
 tests/
   test_dataset.py      the selection rules, checked on diffs rather than the network
+  test_sweep.py        runner, patch capture, and grading integration
 data/
   tasks.jsonl          the 20 evaluation instances
 ```
 
 ## Design notes
 
-**Patches are diffed against HEAD, not the instance's base commit.** Every
-SWE-bench image sits on a marker commit named `SWE-bench` that carries the
-environment adaptations — for astropy, a `pyproject.toml` tweak. Diffing against
-`base_commit` folds those edits into the agent's submission, which then fails to
-apply when the evaluator replays it.
+**Patches are diffed against the workspace's starting HEAD.** Local checkouts
+start at the instance's `base_commit`. Image-based workspaces can include
+additional environment adaptations, so their marker HEAD is the correct base.
+The runner records the starting commit before invoking the agent, ensuring
+that any commits the agent makes are also included in the submitted patch.
 
 **The model layer is a boundary the scaffolds call through**, configured in one
 place, so RQ1 (same model, different scaffold) holds by construction rather than

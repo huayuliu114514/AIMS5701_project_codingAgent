@@ -1,16 +1,11 @@
 """Agent scaffoldings for small coding models on repository maintenance tasks.
 
-Exit status                 resolved              reasoning        token/cost
-  C0  baseline     \
-  C1  full agent    >--- sweep.py ---> sweep.py  ---> judge.py ---> report
-  C2  no-map       /
+C0 / C1 / C2 -> sweep run -> predictions.jsonl -> sweep grade -> SWE-bench
 
-The contribution of this project is the leftmost column: several scaffolds,
-one model, one budget. Everything to the right of the arrow is measurement,
-and measurement is taken from the official SWE-bench harness rather than
-reimplemented, so numbers stay comparable with published results.
+The scaffolds share one model configuration and resource budget. The runner
+records patches, trajectories, usage, and time; the official SWE-bench harness
+supplies resolution judgments. Human evaluation and analysis come later.
 
-The model itself never appears here. It is a boundary the scaffolds call
-through, configured in one place, so RQ1 (same model, different scaffold) holds
-by construction instead of by discipline.
+Agents execute locally in WSL. The project's DockerEnv is unused; Docker is
+managed by the official harness for grading only.
 """
