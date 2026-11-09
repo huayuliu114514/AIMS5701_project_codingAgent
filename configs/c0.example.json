@@ -1,0 +1,8 @@
+{
+  "base_url": "http://127.0.0.1:8000/v1",
+  "model": "your-model-id",
+  "api_key": "",
+  "reasoning_effort": "medium",
+  "command_timeout": 60,
+  "max_observation_chars": 20000
+}
