@@ -18,6 +18,9 @@ dist/
 runs/
 logs/
 
+# Private model configs can contain API credentials.
+configs/*.local.json
+
 # data/tasks.jsonl is deliberately NOT ignored. It is the record of which tasks
 # a given result was measured on; the selection code will keep changing, and
 # without the file there is no way to tell what a past number refers to.
