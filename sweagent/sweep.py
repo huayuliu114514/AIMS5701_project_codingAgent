@@ -12,6 +12,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sweagent.dataset import DATASET, SPLIT, Task, load
+from sweagent.envs import capture_patch
+from sweagent.envs.local_env import LocalEnv
+from sweagent.model import logged_config
+
+
+def create_environment(kind: str, task: Task, workspace_root: Path | None, config: dict):
+    if kind == "local":
+        return LocalEnv(workspace_root / task.instance_id, config["command_timeout"])
+    from sweagent.envs.docker_env import DockerEnv
+    return DockerEnv(task.image, config["command_timeout"])
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TASKS = ROOT / "data" / "tasks.jsonl"
@@ -30,20 +40,22 @@ def write_json(path: Path, value: dict) -> None:
 def run(
     tasks: list[Task],
     agent: Callable[..., dict],
-    workspace_root: Path,
+    workspace_root: Path | None,
     run_dir: Path,
     config: dict,
     scaffold: str,
     agent_name: str,
+    environment: str = "docker",
 ) -> Path:
-    """Call agent(issue, repo_dir, config, log_dir); it edits files and returns usage.
+    """Call agent(issue, environment, config, log_dir) and capture its submission.
 
-    The returned usage dictionary must be JSON-serializable.
-    Workspaces are fresh, prepared Git checkouts at workspace_root/instance_id.
-    The agent writes its trajectory in log_dir. Config contains a model label
-    under 'model'; credentials belong in environment variables.
+    Local mode uses prepared checkouts; Docker mode starts fresh task containers.
+    Returned usage must be JSON-serializable. Config may include api_key;
+    that field is omitted from recorded metadata.
     """
-    workspace_root = workspace_root.resolve()
+    workspace_root = workspace_root.resolve() if workspace_root is not None else None
+    config = {"reasoning_effort": "medium", "command_timeout": 60,
+              "max_observation_chars": 20000, **config}
     run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True)
     write_json(run_dir / "run.json", {
@@ -53,8 +65,9 @@ def run(
         "instance_ids": [task.instance_id for task in tasks],
         "scaffold": scaffold,
         "agent": agent_name,
-        "config": config,
-        "workspace_root": str(workspace_root),
+        "config": logged_config(config),
+        "environment": environment,
+        "workspace_root": str(workspace_root) if workspace_root is not None else None,
         "project_commit": git(ROOT, "rev-parse", "HEAD").strip(),
         "project_dirty": bool(git(ROOT, "status", "--porcelain")),
     })
@@ -63,29 +76,40 @@ def run(
     with predictions_path.open("w", encoding="utf-8", newline="\n") as predictions:
         for index, task in enumerate(tasks, 1):
             print(f"[{index}/{len(tasks)}] {task.instance_id}", flush=True)
-            repo_dir = workspace_root / task.instance_id
-            start_commit = git(repo_dir, "rev-parse", "HEAD").strip()
             log_dir = run_dir / task.instance_id
             log_dir.mkdir()
-            started = time.monotonic()
-            usage = agent(task.problem_statement, repo_dir, config, log_dir)
-            elapsed = time.monotonic() - started
-
-            # Include non-ignored new files, staged edits, and agent commits.
-            git(repo_dir, "add", "--intent-to-add", "--all")
-            patch = git(repo_dir, "-c", "core.fileMode=false", "diff", "--binary", start_commit, "--")
-            write_json(log_dir / "usage.json", {
-                "instance_id": task.instance_id,
-                "start_commit": start_commit,
-                "elapsed_seconds": elapsed,
-                "usage": usage,
-            })
-            predictions.write(json.dumps({
-                "instance_id": task.instance_id,
-                "model_name_or_path": config["model"],
-                "model_patch": patch,
-            }, ensure_ascii=False) + "\n")
-            predictions.flush()
+            env = create_environment(environment, task, workspace_root, config)
+            try:
+                start_commit = env.git("rev-parse", "HEAD").strip()
+                write_json(log_dir / "environment.json", {
+                    "kind": environment,
+                    "workdir": env.workdir,
+                    "image": task.image if environment == "docker" else None,
+                    "start_commit": start_commit,
+                })
+                started = time.monotonic()
+                try:
+                    usage = agent(task.problem_statement, env, config, log_dir)
+                except KeyboardInterrupt:
+                    usage = {"stop_reason": "interrupted"}
+                elapsed = time.monotonic() - started
+                patch = capture_patch(env, start_commit)
+                write_json(log_dir / "usage.json", {
+                    "instance_id": task.instance_id,
+                    "start_commit": start_commit,
+                    "elapsed_seconds": elapsed,
+                    "usage": usage,
+                })
+                predictions.write(json.dumps({
+                    "instance_id": task.instance_id,
+                    "model_name_or_path": config["model"],
+                    "model_patch": patch,
+                }, ensure_ascii=False) + "\n")
+                predictions.flush()
+                if usage.get("stop_reason") == "interrupted":
+                    raise KeyboardInterrupt
+            finally:
+                env.close()
     return predictions_path
 
 
@@ -125,7 +149,7 @@ def grade(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    run_parser = commands.add_parser("run", help="Run an agent in prepared workspaces")
+    run_parser = commands.add_parser("run", help="Run an agent locally or in SWE-bench containers")
     grade_parser = commands.add_parser("grade", help="Grade saved predictions (or gold)")
     for child in (run_parser, grade_parser):
         child.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
@@ -133,10 +157,12 @@ def main(argv: list[str] | None = None) -> None:
         child.add_argument("--run-id", required=True)
         child.add_argument("--output-dir", type=Path)
 
-    run_parser.add_argument("--agent", required=True, help="Python callable: module:function")
-    run_parser.add_argument("--scaffold", required=True, help="Experiment label, e.g. c0")
-    run_parser.add_argument("--config", type=Path, required=True, help="JSON agent config with 'model'")
-    run_parser.add_argument("--workspace-root", type=Path, required=True)
+    run_parser.add_argument("--agent", default="sweagent.agents.c0_agent:run_agent",
+                            help="Python callable: module:function")
+    run_parser.add_argument("--scaffold", default="c0", help="Experiment label")
+    run_parser.add_argument("--config", type=Path, required=True, help="JSON model and execution config")
+    run_parser.add_argument("--environment", choices=["local", "docker"], default="docker")
+    run_parser.add_argument("--workspace-root", type=Path, help="Prepared checkouts; required in local mode")
     grade_parser.add_argument("--predictions", required=True, help="Predictions JSONL path, or gold")
     grade_parser.add_argument("--max-workers", type=int, default=1)
     grade_parser.add_argument("--timeout", type=int, default=1800, help="Grading seconds per task")
@@ -152,7 +178,8 @@ def main(argv: list[str] | None = None) -> None:
         config = json.loads(args.config.read_text(encoding="utf-8"))
         output_dir = args.output_dir or ROOT / "runs" / args.run_id
         predictions = run(
-            tasks, agent, args.workspace_root, output_dir, config, args.scaffold, args.agent
+            tasks, agent, args.workspace_root, output_dir, config, args.scaffold, args.agent,
+            args.environment,
         )
         print(f"Predictions: {predictions}")
     else:

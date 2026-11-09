@@ -1,7 +1,7 @@
 # Agent Scaffolding Study
 
 Comparing agent scaffoldings for small coding models on repository maintenance
-tasks — three scaffolds, one model, one budget.
+tasks — three scaffolds, one model, shared execution settings.
 
 | Config | Scaffold | What it adds |
 |--------|----------|--------------|
@@ -18,13 +18,13 @@ reimplemented, so resolution numbers stay comparable with published results.
 
 ## Status
 
-Early. The runner and official grading integration are implemented; the
-scaffolds are not yet built.
+Early. The runner, official grading integration, and C0 baseline are implemented;
+C1 and C2 are not yet built.
 
 - [x] Task selection with the proposal's filter (2–4 non-test source files, ≥3 repos)
 - [x] Sequential runner and prediction recording
 - [x] Verify official grading on one instance (gold patch resolves)
-- [ ] C0 baseline scaffold
+- [x] C0 baseline scaffold (benchmark evaluation pending)
 - [ ] Repository mapping + symbol retrieval (C1, C2 differ here)
 - [ ] Planning, incremental patching, test-driven recovery
 - [ ] Full 20-task run across C0 / C1 / C2
@@ -38,8 +38,9 @@ conda create -y -p ./env python=3.11
 
 `swebench` needs Python ≥3.10. Docker must be running: the evaluator pulls
 `swebench/sweb.eval.x86_64.*` images (~2–3 GB each) and runs the hidden tests
-inside them. Agents use prepared local repository checkouts; the project's
-custom `DockerEnv` is currently unused.
+inside them. Agents can use these prepared containers or local Linux checkouts.
+C0 calls an OpenAI Responses-compatible endpoint; start from
+`configs/c0.example.json` and use `python -m sweagent.sweep run --help` for options.
 
 ## Pipeline
 
@@ -65,10 +66,13 @@ data/tasks.jsonl          committed: the record of what a result was measured on
 sweagent/
   dataset.py           task selection and the files/repos filter
   sweep.py             agent runner and official grading integration
-  envs/docker_env.py   unused container-layer stub
+  model.py             shared Responses-compatible model client
+  agents/c0_agent.py   model-directed baseline with bash and finish tools
+  envs/                local Linux and prepared-container execution
 tests/
   test_dataset.py      the selection rules, checked on diffs rather than the network
   test_sweep.py        runner, patch capture, and grading integration
+  test_c0.py           baseline conversation and tool behavior
 data/
   tasks.jsonl          the 20 evaluation instances
 ```
